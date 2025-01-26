@@ -7,13 +7,22 @@ const questionSchema = mongoose.Schema({
     },
     scale: { 
         type: [Number], 
-        required: true 
+        default: [1, 2, 3, 4, 5] // Likert scale
     },
     traitId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Trait',
         required: true
     },
-}); 
+    typeId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Type', // Reference to the Type model
+            required: true
+        },
+    selectedQuestion: { 
+        type: Boolean, 
+        default: false 
+    },
+});
 
 exports.Question = mongoose.model('Question', questionSchema);

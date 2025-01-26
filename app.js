@@ -26,6 +26,7 @@ const attendanceRoutes = require("./routes/attendance")
 const traitRoutes = require("./routes/trait")
 const questionRoutes = require("./routes/question")
 const responseRoutes = require("./routes/response")
+const typeRoutes = require("./routes/type")
 
 const api = process.env.API_URL;
 
@@ -37,6 +38,7 @@ app.use(`${api}/attendance`, attendanceRoutes);
 app.use(`${api}/traits`, traitRoutes);
 app.use(`${api}/questions`, questionRoutes);
 app.use(`${api}/responses`, responseRoutes);
+app.use(`${api}/types`, typeRoutes);
 app.get("/", (req, res) => {
   res.send("Server is running");
 });

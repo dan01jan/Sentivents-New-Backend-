@@ -3,29 +3,56 @@ const router = express.Router();
 const { Questionnaire } = require('../models/questionnaire');
 const { Question } = require('../models/question');
 const { Trait } = require('../models/trait');
+const { Event } = require('../models/event');
 const { Response } = require('../models/response');
 const { User } = require('../models/user'); // Import the User model
 
 // Create Questionnaire
 router.post('/create', async (req, res) => {
-    const { eventId, questions } = req.body;
+  const { eventId, selectedQuestions } = req.body;
 
-    if (!eventId || !questions || questions.length === 0) {
-        return res.status(400).json({ message: "Event ID and questions are required" });
-    }
+  if (!eventId || !selectedQuestions || selectedQuestions.length === 0) {
+    return res.status(400).json({ message: "Event ID and selected questions are required" });
+  }
 
+  try {
+    // Step 1: Create the Questionnaire
+    const questionnaire = new Questionnaire({
+      eventId,
+      questions: selectedQuestions,
+    });
+
+    const savedQuestionnaire = await questionnaire.save();
+
+    // Step 2: Update the selectedQuestion field for the chosen questions
     try {
-        const questionnaire = new Questionnaire({
-            eventId,
-            questions,
-        });
+      await Question.updateMany(
+        { _id: { $in: selectedQuestions } },
+        { $set: { selectedQuestion: true } }
+      );
 
-        const savedQuestionnaire = await questionnaire.save();
-        res.status(201).json({ message: "Questionnaire created successfully", questionnaire: savedQuestionnaire });
-    } catch (error) {
-        console.error('Error creating questionnaire:', error);
-        res.status(500).json({ message: "Error creating questionnaire", error });
+      // Step 3: Update the hasQuestionnaire field in the Event model
+      await Event.findByIdAndUpdate(
+        eventId,
+        { $set: { hasQuestionnaire: true } },
+        { new: true }
+      );
+
+      res.status(201).json({
+        message: "Questionnaire created successfully and event updated",
+        questionnaire: savedQuestionnaire,
+      });
+    } catch (updateError) {
+      console.error('Error updating selected questions:', updateError);
+
+      // Rollback: Delete the created Questionnaire
+      await Questionnaire.findByIdAndDelete(savedQuestionnaire._id);
+      res.status(500).json({ message: "Error updating selected questions", error: updateError });
     }
+  } catch (error) {
+    console.error('Error creating questionnaire:', error);
+    res.status(500).json({ message: "Error creating questionnaire", error });
+  }
 });
 
 

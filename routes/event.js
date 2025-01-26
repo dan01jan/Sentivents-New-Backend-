@@ -1,6 +1,7 @@
 const express = require('express');
 const { Event } = require('../models/event');
 const { User } = require('../models/user');
+const { Type } = require('../models/type');
 const router = express.Router();
 const mongoose = require('mongoose');
 const cloudinary = require('../utils/cloudinary');
@@ -49,137 +50,165 @@ router.get('/events', async (req, res) => {
 
 // Create Web Events
 router.post(`/create`, uploadOptions.array('images', 10), async (req, res) => {
-    console.log('Register Request Body:', req.body);
-  
-    // Check if files are included in the request
-    const files = req.files;
-    if (!files || files.length === 0) {
-      return res.status(400).send('No images uploaded in the request');
-    }
-  
-    try {
+  console.log('Register Request Body:', req.body);
+
+  // Ensure the type is a valid string and find the corresponding ObjectId in the Type collection
+  const eventType = Array.isArray(req.body.type) ? req.body.type[0] : req.body.type;
+
+  try {
+      // Find the corresponding Type document using the eventType (like "Academic events")
+      const typeDoc = await Type.findOne({ eventType: eventType });
+      if (!typeDoc) {
+          return res.status(400).send('Invalid event type');
+      }
+
+      const typeObjectId = typeDoc._id;  // This will be the ObjectId of the selected type
+
+      // Check if files are included in the request
+      const files = req.files;
+      if (!files || files.length === 0) {
+          return res.status(400).send('No images uploaded in the request');
+      }
+
       // Upload images to Cloudinary and get the URLs
       const uploadPromises = files.map(file => {
-        return new Promise((resolve, reject) => {
-          cloudinary.uploader.upload_stream(
-            { resource_type: 'image' },
-            (error, result) => {
-              if (error) {
-                reject(error);  // Reject if there's an error
-              } else {
-                resolve(result.secure_url);  // Resolve with the image URL
-              }
-            }
-          ).end(file.buffer);  // Ensure to call .end() to initiate the upload
-        });
+          return new Promise((resolve, reject) => {
+              cloudinary.uploader.upload_stream(
+                  { resource_type: 'image' },
+                  (error, result) => {
+                      if (error) {
+                          reject(error);  // Reject if there's an error
+                      } else {
+                          resolve(result.secure_url);  // Resolve with the image URL
+                      }
+                  }
+              ).end(file.buffer);  // Ensure to call .end() to initiate the upload
+          });
       });
-  
+
       // Wait for all images to upload and get their URLs
       const imageUrls = await Promise.all(uploadPromises);
-  
-      // Continue with saving event
+
+      // Create and save the event
       const event = new Event({
-        name: req.body.name,
-        description: req.body.description,
-        type: req.body.type,
-        organization: req.body.organization,
-        department: req.body.department,
-        dateStart: req.body.dateStart,
-        dateEnd: req.body.dateEnd,
-        location: req.body.location,
-        images: imageUrls,  // Store the image URLs
-        userId: req.body.userId,
-      });
-  
-      const savedEvent = await event.save();
-      if (!savedEvent) {
-        return res.status(500).send('The event cannot be created');
-      }
-  
-      res.send(savedEvent);
-  
-    } catch (error) {
-      console.error('Error processing the event:', error);
-      res.status(500).send('Error processing the event: ' + error.message);
-    }
-  });
-
-// Update Web Event
-router.put('/:id', uploadOptions.array('images', 10), async (req, res) => {
-    console.log('Update Request Body:', req.body);    
-  
-    const event = await Event.findById(req.params.id);
-    console.log("Event found:", event._id);
-    if (!event) return res.status(400).send('Invalid Event!');
-  
-    const files = req.files;
-    const existingImages = Array.isArray(req.body.existingImages) 
-        ? req.body.existingImages 
-        : (req.body.existingImages ? [req.body.existingImages] : []);
-  
-    try {
-      let images = [...existingImages];
-  
-      if (files && files.length > 0) {
-        // Upload new images to Cloudinary and get the URLs
-        const imagePromises = files.map((file) => {
-          return new Promise((resolve, reject) => {
-            let cld_upload_stream = cloudinary.uploader.upload_stream(
-              { folder: 'events' },
-              (error, result) => {
-                if (error) reject(error);
-                else resolve(result.secure_url);
-              }
-            );
-
-            streamifier.createReadStream(file.buffer).pipe(cld_upload_stream);
-          });
-        });
-  
-        const newImages = await Promise.all(imagePromises);
-        images = [...images, ...newImages];
-      }
-  
-      const updatedEvent = await Event.findByIdAndUpdate(
-        req.params.id,
-        {
           name: req.body.name,
           description: req.body.description,
-          type: req.body.type,
+          type: typeObjectId,  // Use the correct ObjectId for the type
+          organization: req.body.organization,
+          department: req.body.department,
           dateStart: req.body.dateStart,
           dateEnd: req.body.dateEnd,
           location: req.body.location,
-          images: images,  // Save both existing and new Cloudinary URLs
+          images: imageUrls,  // Store the image URLs
           userId: req.body.userId,
-        },
-        { new: true }
-      );
-  
-      if (!updatedEvent) return res.status(400).send('The event cannot be updated!');
-  
-      res.json({
-        message: 'Event updated successfully',
-        updatedEvent,
       });
-    } catch (error) {
+
+      const savedEvent = await event.save();
+      if (!savedEvent) {
+          return res.status(500).send('The event cannot be created');
+      }
+
+      res.send(savedEvent);
+
+  } catch (error) {
+      console.error('Error processing the event:', error);
+      res.status(500).send('Error processing the event: ' + error.message);
+  }
+});
+
+// Update Web Event
+router.put('/:id', uploadOptions.array('images', 10), async (req, res) => {
+  console.log('Update Request Body:', req.body);
+
+  const event = await Event.findById(req.params.id);
+  if (!event) return res.status(400).send('Invalid Event!');
+
+  console.log("Event found:", event._id);
+
+  // Check if the event type exists in the Type collection
+  const eventType = await Type.findOne({ eventType: req.body.type }); // Get ObjectId using eventType string
+  if (!eventType) {
+      return res.status(400).send('Invalid event type');
+  }
+
+  const files = req.files;
+  const existingImages = Array.isArray(req.body.existingImages) 
+      ? req.body.existingImages 
+      : (req.body.existingImages ? [req.body.existingImages] : []);
+
+  try {
+      let images = [...existingImages];
+
+      if (files && files.length > 0) {
+          // Upload new images to Cloudinary and get the URLs
+          const imagePromises = files.map((file) => {
+              return new Promise((resolve, reject) => {
+                  let cld_upload_stream = cloudinary.uploader.upload_stream(
+                      { folder: 'events' },
+                      (error, result) => {
+                          if (error) reject(error);
+                          else resolve(result.secure_url);
+                      }
+                  );
+
+                  streamifier.createReadStream(file.buffer).pipe(cld_upload_stream);
+              });
+          });
+
+          const newImages = await Promise.all(imagePromises);
+          images = [...images, ...newImages];
+      }
+
+      // Remove old images from Cloudinary (if you want to implement image removal logic)
+      if (req.body.removeImages && Array.isArray(req.body.removeImages)) {
+          const removePromises = req.body.removeImages.map((imageUrl) => {
+              return cloudinary.uploader.destroy(imageUrl.split('/').pop().split('.')[0]); // Extract public ID and delete
+          });
+          await Promise.all(removePromises);
+      }
+
+      const updatedEvent = await Event.findByIdAndUpdate(
+          req.params.id,
+          {
+              name: req.body.name,
+              description: req.body.description,
+              type: eventType._id,  // Use ObjectId for type
+              dateStart: req.body.dateStart,
+              dateEnd: req.body.dateEnd,
+              location: req.body.location,
+              images: images,  // Save both existing and new Cloudinary URLs
+              userId: req.body.userId,
+          },
+          { new: true }
+      );
+
+      if (!updatedEvent) return res.status(400).send('The event cannot be updated!');
+
+      res.json({
+          message: 'Event updated successfully',
+          updatedEvent,
+      });
+  } catch (error) {
       console.error(error);
       res.status(500).send('Error updating event: ' + error.message);
-    }
+  }
 });
-  
-// Get Admin's Events
+
+// Get Admin's Events with eventType populated (name)
 router.get('/adminevents', async (req, res) => {
-    try {
-        const adminUsers = await User.find({ isAdmin: true });
-        const adminIds = adminUsers.map(admin => admin._id);
+  try {
+    const adminUsers = await User.find({ isAdmin: true });
+    const adminIds = adminUsers.map(admin => admin._id);
 
-        const events = await Event.find({ userId: { $in: adminIds } });
-        res.status(200).send(events);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+    // Populate the `type` field with the eventType from the `Type` model
+    const events = await Event.find({ userId: { $in: adminIds } })
+      .populate('type', 'eventType');  // Populate the `type` field with the `eventType` name
+
+    res.status(200).send(events);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
-
 
 // router.put('/:id', uploadOptions.array('images', 10), async (req, res) => {
 //     console.log(req.body);
